@@ -2,8 +2,8 @@
 from datetime import timedelta
 import logging
 
-from mikettle.mikettle import MiKettle
-from mikettle.mikettle import (
+from .mikettle import MiKettle
+from .mikettle import (
     MI_ACTION,
     MI_MODE,
     MI_SET_TEMPERATURE,
