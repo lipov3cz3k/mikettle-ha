@@ -7,8 +7,12 @@ from bluepy.btle import UUID, Peripheral, DefaultDelegate
 from datetime import datetime, timedelta
 from threading import Lock
 
-_KEY1 = bytes([0x90, 0xCA, 0x85, 0xDE])
-_KEY2 = bytes([0x92, 0xAB, 0x54, 0xFA])
+_SESSION_START = bytes([0x00, 0xBC, 0x43, 0xCD])
+_SESSION_END = bytes([0x09, 0xAC, 0xBF, 0x93])
+_CONFIRMATION = bytes([0xC9, 0x58, 0x9A, 0x36])
+
+_TOKEN = bytes([0xD5, 0xEB, 0xE8, 0xFF, 0x8B, 0x99, 0xA5, 0x27, 0x26, 0x14, 0x54, 0x12])
+_MAC = "78:11:DC:C2:F1:7F"
 
 _HANDLE_READ_FIRMWARE_VERSION = 26
 _HANDLE_READ_NAME = 20
@@ -55,7 +59,7 @@ class MiKettle(object):
     A class to control mi kettle device.
     """
 
-    def __init__(self, mac, product_id, cache_timeout=600, retries=3, iface=None, token=None):
+    def __init__(self, mac=_MAC, product_id=131, cache_timeout=600, retries=3, token=_TOKEN):
         """
         Initialize a Mi Kettle for the given MAC address.
         """
@@ -63,24 +67,25 @@ class MiKettle(object):
 
         self._mac = mac
         self._reversed_mac = MiKettle.reverseMac(mac)
-
         self._cache = None
         self._cache_timeout = timedelta(seconds=cache_timeout)
         self._last_read = None
+        self._ekey = None
+        self._challenging = False
+        self._confirming = False
+        self._connected = False
+        self._authed = False
         self.retries = retries
         self.ble_timeout = 10
         self.lock = Lock()
-
         self._product_id = product_id
-        self._iface = iface
-        # Generate token if not supplied
-        if token is None:
-            token = MiKettle.generateRandomToken()
         self._token = token
 
     def connect(self):
-        self._p = Peripheral(deviceAddr=self._mac, iface=self._iface)
-        self._p.setDelegate(self)
+        if not self._connected:
+            self._p = Peripheral(self._mac)
+            self._p.setDelegate(self)
+            self._connected = True
 
     def name(self):
         """Return the name of the device."""
@@ -144,6 +149,8 @@ class MiKettle(object):
             _LOGGER.debug('Error %s', error)
             self._last_read = datetime.now() - self._cache_timeout + \
                 timedelta(seconds=300)
+            self._connected = False
+            self._authed = False
             return
 
     def clear_cache(self):
@@ -175,32 +182,29 @@ class MiKettle(object):
         return result
 
     def auth(self):
-        auth_service = self._p.getServiceByUUID(_UUID_SERVICE_KETTLE)
-        auth_descriptors = auth_service.getDescriptors()
+        if not self._authed:
+            auth_service = self._p.getServiceByUUID(_UUID_SERVICE_KETTLE)
+            auth_descriptors = auth_service.getDescriptors()
 
-        self._p.writeCharacteristic(_HANDLE_AUTH_INIT, _KEY1, "true")
+            auth_descriptors[1].write(_SUBSCRIBE_TRUE, "true")
 
-        auth_descriptors[1].write(_SUBSCRIBE_TRUE, "true")
+            self._challenging = True
+            self._p.writeCharacteristic(_HANDLE_AUTH_INIT, _SESSION_START, "true")
+            self._p.waitForNotifications(10.0)
 
-        self._p.writeCharacteristic(_HANDLE_AUTH,
-                                    MiKettle.cipher(MiKettle.mixA(self._reversed_mac, self._product_id), self._token),
-                                    "true")
+            self._confirming = True
+            self._p.writeCharacteristic(_HANDLE_AUTH,
+                                        MiKettle.challengeResponse(self._ekey),
+                                        "true")
+            self._p.waitForNotifications(10.0)
 
-        self._p.waitForNotifications(10.0)
-
-        self._p.writeCharacteristic(_HANDLE_AUTH, MiKettle.cipher(self._token, _KEY2), "true")
-
-        self._p.readCharacteristic(_HANDLE_VERSION)
+            self._p.readCharacteristic(_HANDLE_VERSION)
+            self._authed = True
 
     def subscribeToData(self):
         controlService = self._p.getServiceByUUID(_UUID_SERVICE_KETTLE_DATA)
         controlDescriptors = controlService.getDescriptors()
         controlDescriptors[3].write(_SUBSCRIBE_TRUE, "true")
-
-    # TODO: Actually generate random token instead of static one
-    @staticmethod
-    def generateRandomToken() -> bytes:
-        return bytes([0x01, 0x5C, 0xCB, 0xA8, 0x80, 0x0A, 0xBD, 0xC1, 0x2E, 0xB8, 0xED, 0x82])
 
     @staticmethod
     def reverseMac(mac) -> bytes:
@@ -255,12 +259,42 @@ class MiKettle(object):
         perm = MiKettle._cipherInit(key)
         return MiKettle._cipherCrypt(input, perm)
 
-    def handleNotification(self, cHandle, data):
-        if cHandle == _HANDLE_AUTH:
-            if(MiKettle.cipher(MiKettle.mixB(self._reversed_mac, self._product_id),
+    @staticmethod
+    def generateEkey(token, challenge) -> bytes:
+        tick = MiKettle.cipher(token, challenge)
+        ekey = bytearray(token)
+        for i in range(0, 3):
+            ekey[i] ^= tick[i]
+        return ekey
+
+    @staticmethod
+    def challengeResponse(ekey) -> bytes:
+        response = MiKettle.cipher(ekey, _SESSION_END)
+        print("Response: ", response.hex())
+        return response
+
+    @staticmethod
+    def checkConfirmation(ekey, confirmation) -> bool:
+        actual = MiKettle.cipher(ekey, confirmation)[0:4]
+        print("Expected: ", _CONFIRMATION.hex(), ", Actual: ", actual.hex())
+        return actual == _CONFIRMATION
+
+    def checkPairing(self, data) -> bool:
+        return MiKettle.cipher(MiKettle.mixB(self._reversed_mac, self._product_id),
                                MiKettle.cipher(MiKettle.mixA(self._reversed_mac,
                                                              self._product_id),
-                                               data)) != self._token):
+                                               data)) != self._token
+
+    def handleNotification(self, cHandle, data):
+        if cHandle == _HANDLE_AUTH:
+            if self._challenging:
+                self._challenging = False
+                self._ekey = MiKettle.generateEkey(self._token, data)
+            elif self._confirming:
+                self._confirming = False
+                if not MiKettle.checkConfirmation(self._ekey, data):
+                    raise Exception("Unexpected response during confirmation.")
+            elif not checkPairing(self, data):
                 raise Exception("Authentication failed.")
         elif cHandle == _HANDLE_STATUS:
             _LOGGER.debug("Status update:")
