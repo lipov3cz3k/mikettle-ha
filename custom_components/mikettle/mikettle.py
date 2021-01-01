@@ -90,12 +90,6 @@ class MiKettle(object):
         self._product_id = product_id
         self._token = token
 
-    def connect(self):
-        if not self._connected:
-            self._p = Peripheral(self._mac)
-            self._p.setDelegate(self)
-            self._connected = True
-
     def name(self):
         """Return the name of the device."""
         self.connect()
@@ -141,6 +135,14 @@ class MiKettle(object):
         else:
             raise Exception("Could not read data from MiKettle %s" % self._mac)
 
+
+
+    def connect(self):
+        if not self._connected:
+            self._p = Peripheral(self._mac)
+            self._p.setDelegate(self)
+            self._connected = True
+
     def fill_cache(self):
         """Fill the cache with new data from the sensor."""
         _LOGGER.debug('Filling cache with new sensor data.')
@@ -185,14 +187,6 @@ class MiKettle(object):
         res[MI_EWU] = MI_BOOL_MAP[int(data[11])]
         return res
 
-    @staticmethod
-    def bytes_to_int(bytes):
-        result = 0
-        for b in bytes:
-            result = result * 256 + int(b)
-
-        return result
-
     def auth(self):
         if self._authed:
             return
@@ -218,6 +212,48 @@ class MiKettle(object):
         controlService = self._p.getServiceByUUID(_UUID_SERVICE_KETTLE_DATA)
         controlDescriptors = controlService.getDescriptors()
         controlDescriptors[3].write(_SUBSCRIBE_TRUE, "true")
+
+    def checkPairing(self, data) -> bool:
+        return MiKettle.cipher(MiKettle.mixB(self._reversed_mac, self._product_id),
+                               MiKettle.cipher(MiKettle.mixA(self._reversed_mac,
+                                                             self._product_id),
+                                               data)) != self._token
+
+    def handleNotification(self, cHandle, data):
+        if cHandle == _HANDLE_AUTH:
+            if self._challenging:
+                self._challenging = False
+                self._ekey = MiKettle.generateEkey(self._token, data)
+            elif self._confirming:
+                self._confirming = False
+                if not MiKettle.checkConfirmation(self._ekey, data):
+                    raise Exception("Unexpected response during confirmation.")
+            elif not self.checkPairing(data):
+                raise Exception("Authentication failed.")
+        elif cHandle == _HANDLE_STATUS:
+            _LOGGER.debug("Status update:")
+            if data is None:
+              return
+
+            _LOGGER.debug("Parse data: %s", data)
+            self._cache = self._parse_data(data)
+            _LOGGER.debug("data parsed %s", self._cache)
+
+            if self.cache_available():
+                self._last_read = datetime.now()
+            else:
+                # If a sensor doesn't work, wait 5 minutes before retrying
+                self._last_read = datetime.now() - self._cache_timeout + \
+                    timedelta(seconds=300)
+        else:
+            _LOGGER.error("Unknown notification from handle: %s with Data: %s", cHandle, data.hex())
+
+    @staticmethod
+    def bytes_to_int(bytes):
+        result = 0
+        for b in bytes:
+            result = result * 256 + int(b)
+        return result
 
     @staticmethod
     def reverseMac(mac) -> bytes:
@@ -291,39 +327,3 @@ class MiKettle(object):
         actual = MiKettle.cipher(ekey, confirmation)[0:4]
         print("Expected: ", _CONFIRMATION.hex(), ", Actual: ", actual.hex())
         return actual == _CONFIRMATION
-
-    def checkPairing(self, data) -> bool:
-        return MiKettle.cipher(MiKettle.mixB(self._reversed_mac, self._product_id),
-                               MiKettle.cipher(MiKettle.mixA(self._reversed_mac,
-                                                             self._product_id),
-                                               data)) != self._token
-
-    def handleNotification(self, cHandle, data):
-        if cHandle == _HANDLE_AUTH:
-            if self._challenging:
-                self._challenging = False
-                self._ekey = MiKettle.generateEkey(self._token, data)
-            elif self._confirming:
-                self._confirming = False
-                if not MiKettle.checkConfirmation(self._ekey, data):
-                    raise Exception("Unexpected response during confirmation.")
-            elif not self.checkPairing(data):
-                raise Exception("Authentication failed.")
-        elif cHandle == _HANDLE_STATUS:
-            _LOGGER.debug("Status update:")
-            if data is None:
-              return
-
-            _LOGGER.debug("Parse data: %s", data)
-            self._cache = self._parse_data(data)
-            _LOGGER.debug("data parsed %s", self._cache)
-
-            if self.cache_available():
-                self._last_read = datetime.now()
-            else:
-                # If a sensor doesn't work, wait 5 minutes before retrying
-                self._last_read = datetime.now() - self._cache_timeout + \
-                    timedelta(seconds=300)
-        else:
-            _LOGGER.error("Unknown notification from handle: %s with Data: %s", cHandle, data.hex())
-
