@@ -32,24 +32,32 @@ MI_SET_TEMPERATURE = "set temperature"
 MI_CURRENT_TEMPERATURE = "current temperature"
 MI_KW_TYPE = "keep warm type"
 MI_CURRENT_KW_TIME = "current keep warm time"
+MI_SET_KW_TIME = "set keep warm time (/2)"
+MI_DNBA = "do not boil again"
+MI_EWU = "extended warm up"
 
 MI_ACTION_MAP = {
     0: "idle",
     1: "heating",
-    2: "cooling",
+    2: "cooling", # needs review
     3: "keeping warm",
 }
 
 MI_MODE_MAP = {
     255: "none",
     1: "boil",
-    2: "re-boil",
-    3: "keep warm",
+    2: "keep warm",
+    3: "re-boil", # needs review
 }
 
 MI_KW_TYPE_MAP = {
     0: "cool down to the set temperature",
     1: "warm up to the set temperature",
+}
+
+MI_BOOL_MAP = {
+    0: "false",
+    1: "true",
 }
 
 _LOGGER = logging.getLogger(__name__)
@@ -172,6 +180,9 @@ class MiKettle(object):
         res[MI_CURRENT_TEMPERATURE] = int(data[5])
         res[MI_KW_TYPE] = MI_KW_TYPE_MAP[int(data[6])]
         res[MI_CURRENT_KW_TIME] = MiKettle.bytes_to_int(data[7:8])
+        res[MI_DNBA] = MI_BOOL_MAP[int(data[9])]
+        res[MI_SET_KW_TIME] = int(data[10])
+        res[MI_EWU] = MI_BOOL_MAP[int(data[11])]
         return res
 
     @staticmethod
