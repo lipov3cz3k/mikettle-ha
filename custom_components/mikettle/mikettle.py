@@ -43,6 +43,7 @@ MI_ACTION_MAP = {
 MI_MODE_MAP = {
     255: "none",
     1: "boil",
+    2: "re-boil",
     3: "keep warm"
 }
 
