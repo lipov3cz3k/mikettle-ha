@@ -18,7 +18,7 @@ _HANDLE_READ_FIRMWARE_VERSION = 26
 _HANDLE_READ_NAME = 20
 _HANDLE_AUTH_INIT = 44
 _HANDLE_AUTH = 37
-_HANDLE_VERSION = 42
+_HANDLE_VERIFY = 42
 _HANDLE_STATUS = 61
 
 _UUID_SERVICE_KETTLE = "fe95"
@@ -31,25 +31,25 @@ MI_MODE = "mode"
 MI_SET_TEMPERATURE = "set temperature"
 MI_CURRENT_TEMPERATURE = "current temperature"
 MI_KW_TYPE = "keep warm type"
-MI_KW_TIME = "keep warm time"
+MI_CURRENT_KW_TIME = "current keep warm time"
 
 MI_ACTION_MAP = {
     0: "idle",
     1: "heating",
     2: "cooling",
-    3: "keeping warm"
+    3: "keeping warm",
 }
 
 MI_MODE_MAP = {
     255: "none",
     1: "boil",
     2: "re-boil",
-    3: "keep warm"
+    3: "keep warm",
 }
 
 MI_KW_TYPE_MAP = {
-    0: "warm up",
-    1: "cool down"
+    0: "cool down to the set temperature",
+    1: "warm up to the set temperature",
 }
 
 _LOGGER = logging.getLogger(__name__)
@@ -171,7 +171,7 @@ class MiKettle(object):
         res[MI_SET_TEMPERATURE] = int(data[4])
         res[MI_CURRENT_TEMPERATURE] = int(data[5])
         res[MI_KW_TYPE] = MI_KW_TYPE_MAP[int(data[6])]
-        res[MI_KW_TIME] = MiKettle.bytes_to_int(data[7:8])
+        res[MI_CURRENT_KW_TIME] = MiKettle.bytes_to_int(data[7:8])
         return res
 
     @staticmethod
@@ -200,7 +200,7 @@ class MiKettle(object):
                                     "true")
         self._p.waitForNotifications(10.0)
 
-        self._p.readCharacteristic(_HANDLE_VERSION)
+        self._p.readCharacteristic(_HANDLE_VERIFY)
         self._authed = True
 
     def subscribeToData(self):
@@ -296,7 +296,7 @@ class MiKettle(object):
                 self._confirming = False
                 if not MiKettle.checkConfirmation(self._ekey, data):
                     raise Exception("Unexpected response during confirmation.")
-            elif not checkPairing(self, data):
+            elif not self.checkPairing(data):
                 raise Exception("Authentication failed.")
         elif cHandle == _HANDLE_STATUS:
             _LOGGER.debug("Status update:")
