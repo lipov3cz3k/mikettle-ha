@@ -6,6 +6,7 @@ import logging
 from bluepy.btle import UUID, Peripheral, DefaultDelegate
 from datetime import datetime, timedelta
 from threading import Lock
+from typing import Union
 
 _SESSION_START = bytes([0x00, 0xBC, 0x43, 0xCD])
 _SESSION_END = bytes([0x09, 0xAC, 0xBF, 0x93])
@@ -68,7 +69,7 @@ class MiKettle(object):
     A class to control mi kettle device.
     """
 
-    def __init__(self, mac=_MAC, product_id=131, cache_timeout=600, retries=3, token=_TOKEN):
+    def __init__(self, mac=_MAC, product_id=131, cache_timeout=600, retries=3, token=_TOKEN) -> None:
         """
         Initialize a Mi Kettle for the given MAC address.
         """
@@ -90,7 +91,7 @@ class MiKettle(object):
         self._product_id = product_id
         self._token = token
 
-    def name(self):
+    def name(self) -> str:
         """Return the name of the device."""
         self.connect()
         self.auth()
@@ -101,7 +102,7 @@ class MiKettle(object):
                             " from Mi Kettle %s" % (_HANDLE_READ_NAME, self._mac))
         return ''.join(chr(n) for n in name)
 
-    def firmware_version(self):
+    def firmware_version(self) -> str:
         """Return the firmware version."""
         self.connect()
         self.auth()
@@ -112,7 +113,7 @@ class MiKettle(object):
                             " from Mi Kettle %s" % (_HANDLE_READ_FIRMWARE_VERSION, self._mac))
         return ''.join(chr(n) for n in firmware_version)
 
-    def parameter_value(self, parameter, read_cached=True):
+    def parameter_value(self, parameter, read_cached=True) -> Union[int, str]:
         """Return a value of one of the monitored paramaters.
         This method will try to retrieve the data from cache and only
         request it by bluetooth if no cached value is stored or the cache is
@@ -137,13 +138,13 @@ class MiKettle(object):
 
 
 
-    def connect(self):
+    def connect(self) -> None:
         if not self._connected:
             self._p = Peripheral(self._mac)
             self._p.setDelegate(self)
             self._connected = True
 
-    def fill_cache(self):
+    def fill_cache(self) -> None:
         """Fill the cache with new data from the sensor."""
         _LOGGER.debug('Filling cache with new sensor data.')
         try:
@@ -164,16 +165,16 @@ class MiKettle(object):
             self._authed = False
             return
 
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         """Manually force the cache to be cleared."""
         self._cache = None
         self._last_read = None
 
-    def cache_available(self):
+    def cache_available(self) -> bool:
         """Check if there is data in the cache."""
         return self._cache is not None
 
-    def _parse_data(self, data):
+    def _parse_data(self, data) -> dict:
         """Parses the byte array returned by the sensor."""
         res = dict()
         res[MI_ACTION] = MI_ACTION_MAP[int(data[0])]
@@ -187,7 +188,7 @@ class MiKettle(object):
         res[MI_EWU] = MI_BOOL_MAP[int(data[11])]
         return res
 
-    def auth(self):
+    def auth(self) -> None:
         if self._authed:
             return
         auth_service = self._p.getServiceByUUID(_UUID_SERVICE_KETTLE)
@@ -208,7 +209,7 @@ class MiKettle(object):
         self._p.readCharacteristic(_HANDLE_VERIFY)
         self._authed = True
 
-    def subscribeToData(self):
+    def subscribeToData(self) -> None:
         controlService = self._p.getServiceByUUID(_UUID_SERVICE_KETTLE_DATA)
         controlDescriptors = controlService.getDescriptors()
         controlDescriptors[3].write(_SUBSCRIBE_TRUE, "true")
@@ -219,7 +220,7 @@ class MiKettle(object):
                                                              self._product_id),
                                                data)) != self._token
 
-    def handleNotification(self, cHandle, data):
+    def handleNotification(self, cHandle, data) -> None:
         if cHandle == _HANDLE_AUTH:
             if self._challenging:
                 self._challenging = False
@@ -249,7 +250,7 @@ class MiKettle(object):
             _LOGGER.error("Unknown notification from handle: %s with Data: %s", cHandle, data.hex())
 
     @staticmethod
-    def bytes_to_int(bytes):
+    def bytes_to_int(bytes) -> int:
         result = 0
         for b in bytes:
             result = result * 256 + int(b)
