@@ -183,24 +183,25 @@ class MiKettle(object):
         return result
 
     def auth(self):
-        if not self._authed:
-            auth_service = self._p.getServiceByUUID(_UUID_SERVICE_KETTLE)
-            auth_descriptors = auth_service.getDescriptors()
+        if self._authed:
+            return
+        auth_service = self._p.getServiceByUUID(_UUID_SERVICE_KETTLE)
+        auth_descriptors = auth_service.getDescriptors()
 
-            auth_descriptors[1].write(_SUBSCRIBE_TRUE, "true")
+        auth_descriptors[1].write(_SUBSCRIBE_TRUE, "true")
 
-            self._challenging = True
-            self._p.writeCharacteristic(_HANDLE_AUTH_INIT, _SESSION_START, "true")
-            self._p.waitForNotifications(10.0)
+        self._challenging = True
+        self._p.writeCharacteristic(_HANDLE_AUTH_INIT, _SESSION_START, "true")
+        self._p.waitForNotifications(10.0)
 
-            self._confirming = True
-            self._p.writeCharacteristic(_HANDLE_AUTH,
-                                        MiKettle.challengeResponse(self._ekey),
-                                        "true")
-            self._p.waitForNotifications(10.0)
+        self._confirming = True
+        self._p.writeCharacteristic(_HANDLE_AUTH,
+                                    MiKettle.challengeResponse(self._ekey),
+                                    "true")
+        self._p.waitForNotifications(10.0)
 
-            self._p.readCharacteristic(_HANDLE_VERSION)
-            self._authed = True
+        self._p.readCharacteristic(_HANDLE_VERSION)
+        self._authed = True
 
     def subscribeToData(self):
         controlService = self._p.getServiceByUUID(_UUID_SERVICE_KETTLE_DATA)
